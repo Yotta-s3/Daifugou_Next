@@ -12,35 +12,7 @@ import type {
   RuleSettings,
   Suit,
 } from './types'
-
-const SUITS: Suit[] = ['spade', 'heart', 'diamond', 'club']
-const SUIT_SYMBOL: Record<Suit, string> = {
-  spade: '♠',
-  heart: '♥',
-  diamond: '♦',
-  club: '♣',
-}
-
-const SUIT_ORDER: Suit[] = ['club', 'diamond', 'heart', 'spade']
-
-const RANKS = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-
-const RANK_LABEL: Record<number, string> = {
-  3: '3',
-  4: '4',
-  5: '5',
-  6: '6',
-  7: '7',
-  8: '8',
-  9: '9',
-  10: '10',
-  11: 'J',
-  12: 'Q',
-  13: 'K',
-  14: 'A',
-  15: '2',
-  16: 'Jo',
-}
+import { RANKS, RANK_LABEL, SUIT_ORDER, SUIT_SYMBOL, SUITS } from './constants'
 
 export const DEFAULT_RULES: RuleSettings = {
   shibari: true,
@@ -550,6 +522,10 @@ function analyzeCombo(cards: Card[], rules: RuleSettings): Combo | null {
     return null
   }
   const sorted = sortCards(cards)
+  const jokers = sorted.filter(card => card.suit === 'joker')
+  const nonJokers = sorted.filter(card => card.suit !== 'joker')
+  const jokerCount = jokers.length
+
   if (sorted.length === 1) {
     const card = sorted[0]
     return {
@@ -560,23 +536,43 @@ function analyzeCombo(cards: Card[], rules: RuleSettings): Combo | null {
       suitConstraint: card.suit === 'joker' ? null : (card.suit as Suit),
     }
   }
-  if (sorted.every(card => card.suit !== 'joker' && card.rank === sorted[0].rank)) {
-    const type = toGroupType(sorted.length)
-    if (!type) {
-      return null
-    }
-    return {
-      type,
-      cards: sorted,
-      strength: sorted[0].rank,
-      length: sorted.length,
-      suitConstraint: allSameSuit(sorted) ? (sorted[0].suit as Suit) : null,
+
+  if (nonJokers.length > 0 && allSameRank(nonJokers)) {
+    const totalLength = sorted.length
+    const type = toGroupType(totalLength)
+    if (type) {
+      return {
+        type,
+        cards: sorted,
+        strength: nonJokers[0].rank,
+        length: totalLength,
+        suitConstraint: jokerCount === 0 && allSameSuit(sorted) ? (sorted[0].suit as Suit) : null,
+      }
     }
   }
-  if (rules.enableSequences && isSequence(sorted)) {
-    return makeSequenceCombo(sorted)
+
+  if (rules.enableSequences && sorted.length >= 3) {
+    const sequence = analyzeSequence(nonJokers, jokerCount)
+    if (sequence) {
+      return {
+        type: 'sequence',
+        cards: sorted,
+        strength: sequence.maxRank,
+        length: sorted.length,
+        suitConstraint: sequence.suit,
+      }
+    }
   }
+
   return null
+}
+
+function allSameRank(cards: Card[]): boolean {
+  if (cards.length === 0) {
+    return false
+  }
+  const rank = cards[0].rank
+  return cards.every(card => card.rank === rank)
 }
 
 function toGroupType(length: number): ComboType | null {
@@ -592,22 +588,41 @@ function toGroupType(length: number): ComboType | null {
   }
 }
 
-function isSequence(cards: Card[]): boolean {
-  if (cards.length < 3) {
-    return false
+function analyzeSequence(nonJokers: Card[], jokerCount: number): { suit: Suit; maxRank: number } | null {
+  if (nonJokers.length === 0) {
+    return null
   }
-  const suits = new Set(cards.map(card => card.suit))
-  if (suits.size !== 1) {
-    return false
+  const suit = nonJokers[0].suit as Suit
+  if (nonJokers.some(card => card.suit !== suit)) {
+    return null
   }
-  for (let i = 1; i < cards.length; i += 1) {
-    const prev = cards[i - 1]
-    const curr = cards[i]
-    if (curr.rank !== prev.rank + 1) {
-      return false
-    }
+  const ranks = [...new Set(nonJokers.map(card => card.rank))].sort((a, b) => a - b)
+  if (ranks.length !== nonJokers.length) {
+    return null
   }
-  return true
+  let needed = 0
+  for (let i = 1; i < ranks.length; i += 1) {
+    needed += ranks[i] - ranks[i - 1] - 1
+  }
+  if (needed > jokerCount) {
+    return null
+  }
+  let remaining = jokerCount - needed
+  let minRank = ranks[0]
+  let maxRank = ranks[ranks.length - 1]
+  const extendLeft = Math.min(remaining, minRank - 3)
+  minRank -= extendLeft
+  remaining -= extendLeft
+  const extendRight = Math.min(remaining, 15 - maxRank)
+  maxRank += extendRight
+  remaining -= extendRight
+  if (remaining > 0) {
+    return null
+  }
+  if (minRank < 3 || maxRank > 15) {
+    return null
+  }
+  return { suit, maxRank }
 }
 
 function makeSequenceCombo(cards: Card[]): Combo {
@@ -675,6 +690,14 @@ export function canComboBeatField(state: GameState, combo: Combo): boolean {
     return false
   }
   if (field.shibariSuit && combo.suitConstraint && combo.suitConstraint !== field.shibariSuit) {
+    return false
+  }
+  const fieldHasJoker = field.combo.cards.some(card => card.suit === 'joker')
+  const comboHasJoker = combo.cards.some(card => card.suit === 'joker')
+  if (comboHasJoker && !fieldHasJoker) {
+    return true
+  }
+  if (!comboHasJoker && fieldHasJoker) {
     return false
   }
   const direction = comparisonDirection(field)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { applyAction, createGameState, formatCards, getPlayerById, resolvePendingEffect, validateSelection, HUMAN_PLAYER_ID } from '../game/engine'
-import type { Card, Combo, EffectResolution, GameState, PendingEffect, PlayerState, Suit } from '../game/types'
+import type { Combo, EffectResolution, GameState, PendingEffect, PlayerState, Suit } from '../game/types'
 import type { AppConfig } from '../types/app'
 import { decideCpuAction } from '../game/cpu'
 import { EffectPanel } from '../components/EffectPanel'
